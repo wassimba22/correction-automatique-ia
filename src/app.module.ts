@@ -13,6 +13,7 @@ import { Exercice } from './exercices/exercice.entity';
 import { Texte } from './textes/texte.entity';
 import { Correction } from './corrections/correction.entity';
 import { Note } from './notes/note.entity';
+import { NotesModule } from './notes/notes.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { Note } from './notes/note.entity';
     PackagesModule,
     ExercicesModule,
     TextesModule,
+    NotesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
