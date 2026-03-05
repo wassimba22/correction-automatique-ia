@@ -71,4 +71,57 @@ const commentaire = this.commentaireRepository.create({
 
   return savedTexte;
 }
+
+async findOneComplet(id: string, user: any) {
+  const texte = await this.texteRepository.findOne({
+    where: { id },
+    relations: [
+      'student',
+      'exercice',
+      'correction',
+      'note',
+      'commentaires',
+      'commentaires.enseignant',
+    ],
+  });
+
+  if (!texte) {
+    throw new Error('Texte introuvable');
+  }
+
+  // 🔐 Sécurité : si étudiant
+  if (user.role === 'student' && texte.student.id !== user.id) {
+    throw new Error('Accès refusé');
+  }
+
+  return texte;
+}
+
+async findMesTextes(studentId: string) {
+  return this.texteRepository.find({
+    where: { student: { id: studentId } },
+    relations: ['exercice', 'note'],
+    order: { dateSoumission: 'DESC' },
+  });
+}
+
+async findTextesByExercice(exerciceId: string) {
+
+  return this.texteRepository.find({
+    where: { exercice: { id: exerciceId } },
+    relations: ['student', 'note'],
+    order: { dateSoumission: 'DESC' },
+  });
+}
+
+async findMonTexte(exerciceId: string, studentId: string) {
+
+  return this.texteRepository.findOne({
+    where: {
+      exercice: { id: exerciceId },
+      student: { id: studentId },
+    },
+    relations: ['note'],
+  });
+}
 }
