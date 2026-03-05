@@ -5,6 +5,7 @@ export class ExercicesService {
     constructor(
         private packageRepository: any,
         private exerciceRepository: any,
+        private texteRepository: any,
     ) {}
 
     async create(data: any) {
@@ -20,5 +21,32 @@ export class ExercicesService {
   });
 
   return this.exerciceRepository.save(exercice);
+}
+async findExercices(packageId: string) {
+  return this.exerciceRepository.find({
+    where: { package: { id: packageId } },
+  });
+}
+
+async findTextesByExercice(
+  exerciceId: string,
+  page: number = 1,
+  limit: number = 10,
+) {
+
+  const [data, total] = await this.texteRepository.findAndCount({
+    where: { exercice: { id: exerciceId } },
+    relations: ['student', 'note'],
+    order: { dateSoumission: 'DESC' },
+    skip: (page - 1) * limit,
+    take: limit,
+  });
+
+  return {
+    data,
+    total,
+    page,
+    lastPage: Math.ceil(total / limit),
+  };
 }
 }
