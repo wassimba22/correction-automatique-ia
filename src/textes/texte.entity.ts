@@ -7,9 +7,10 @@ import {
 import { User } from '../users/user.entity';
 import { Exercice } from '../exercices/exercice.entity';
 import { OneToOne } from 'typeorm';
-import { Correction } from '../corrections/correction.entity';
+import { Correction } from '../corrections/corrections.entity';
+import { Note } from '../notes/notes.entity';
 import { OneToMany } from 'typeorm';
-import { Commentaire } from '../commentaires/commentaire.entity';
+import { Commentaire } from '../commentaires/commentaires.entity';
 
 
 @Entity()

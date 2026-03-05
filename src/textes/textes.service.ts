@@ -97,12 +97,58 @@ async findOneComplet(id: string, user: any) {
   return texte;
 }
 
-async findMesTextes(studentId: string) {
-  return this.texteRepository.find({
-    where: { student: { id: studentId } },
-    relations: ['exercice', 'note'],
-    order: { dateSoumission: 'DESC' },
-  });
+async findMesTextes(
+  studentId: string,
+  page: number,
+  limit: number,
+  filters: any,
+) {
+
+  const query = this.texteRepository
+    .createQueryBuilder('texte')
+    .leftJoinAndSelect('texte.exercice', 'exercice')
+    .leftJoinAndSelect('texte.note', 'note')
+    .where('texte.studentId = :studentId', { studentId });
+
+  if (filters.statut) {
+    query.andWhere('texte.statut = :statut', { statut: filters.statut });
+  }
+
+  if (filters.validee !== undefined) {
+    query.andWhere('note.validee = :validee', { validee: filters.validee });
+  }
+
+  if (filters.minNote) {
+    query.andWhere('note.noteFinale >= :minNote', { minNote: filters.minNote });
+  }
+
+  if (filters.maxNote) {
+    query.andWhere('note.noteFinale <= :maxNote', { maxNote: filters.maxNote });
+  }
+
+  if (filters.sort) {
+    const order = filters.order || 'DESC';
+    if (filters.sort === 'noteFinale') {
+      query.orderBy('note.noteFinale', order);
+    }
+    else if (filters.sort === 'dateSoumission') {
+      query.orderBy('texte.dateSoumission', order);
+    }
+  }
+  else {
+    query.orderBy('texte.dateSoumission', 'DESC');
+  }
+
+  query.skip((page - 1) * limit).take(limit);
+
+  const [data, total] = await query.getManyAndCount();
+
+  return {
+    data,
+    total,
+    page,
+    lastPage: Math.ceil(total / limit),
+  };
 }
 
 async findTextesByExercice(exerciceId: string) {
@@ -124,4 +170,5 @@ async findMonTexte(exerciceId: string, studentId: string) {
     relations: ['note'],
   });
 }
+
 }
