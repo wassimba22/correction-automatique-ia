@@ -11,12 +11,6 @@ import { NotesModule } from './notes/notes.module';
 import { CorrectionsModule } from './corrections/corrections.module';
 import { CommentairesModule } from './commentaires/commentaires.module';
 import { DashboardModule } from './dashboard/dashboard.module';
-import { User } from './users/user.entity';
-import { Package } from './packages/package.entity';
-import { Exercice } from './exercices/exercice.entity';
-import { Texte } from './textes/texte.entity';
-import { Correction } from './corrections/correction.entity';
-import { Note } from './notes/note.entity';
 
 @Module({
   imports: [
@@ -29,7 +23,6 @@ import { Note } from './notes/note.entity';
       database: 'correction_db',
       autoLoadEntities: true,
       synchronize: true,
-      entities: [User, Package, Exercice, Texte, Correction, Note],
     }),
     UsersModule,
     AuthModule,

@@ -1,174 +1,179 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { IaService } from 'src/ia/ia.service';
-import { Column } from 'typeorm/browser/decorator/columns/Column.js';
+import { User } from '../users/user.entity';
+import { Exercice } from '../exercices/exercice.entity';
+import { Texte } from './texte.entity';
+import { Correction } from '../corrections/corrections.entity';
+import { Note } from '../notes/notes.entity';
+import { Commentaire } from '../commentaires/commentaires.entity';
 
 @Injectable()
 export class TextesService {
   constructor(
-    private readonly userRepository: any,
-    private readonly exerciceRepository: any,
-    private readonly texteRepository: any,
-    private readonly correctionRepository: any,
-    private readonly noteRepository: any,
-    private readonly commentaireRepository: any,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(Exercice)
+    private readonly exerciceRepository: Repository<Exercice>,
+    @InjectRepository(Texte)
+    private readonly texteRepository: Repository<Texte>,
+    @InjectRepository(Correction)
+    private readonly correctionRepository: Repository<Correction>,
+    @InjectRepository(Note)
+    private readonly noteRepository: Repository<Note>,
+    @InjectRepository(Commentaire)
+    private readonly commentaireRepository: Repository<Commentaire>,
     private readonly iaService: IaService,
   ) {}
 
-async create(data: any, studentId: string) {
+  async create(data: any, studentId: string) {
+    const student = await this.userRepository.findOne({
+      where: { id: studentId },
+    });
 
-  const student = await this.userRepository.findOne({
-    where: { id: studentId },
-  });
-
-  const exercice = await this.exerciceRepository.findOne({
-    where: { id: data.exerciceId },
-  });
-
-  // 1️⃣ Enregistrer texte
-  const texte = this.texteRepository.create({
-    contenuOriginal: data.contenuOriginal,
-    student,
-    exercice,
-    statut: 'soumis',
-  });
-
-  const savedTexte = await this.texteRepository.save(texte);
-
-  // 2️⃣ Appel IA
-  const iaResult = await this.iaService.analyserTexte(data.contenuOriginal);
-
-  // 3️⃣ Créer Correction
-  const correction = this.correctionRepository.create({
-    contenuCorrige: iaResult.contenuCorrige,
-    explication: iaResult.explication,
-    texte: savedTexte,
-  });
-
-  await this.correctionRepository.save(correction);
-
-  // 4️⃣ Créer Note
-  const note = this.noteRepository.create({
-    noteIA: iaResult.noteIA,
-    noteFinale: null,
-    validee: false,
-    texte: savedTexte,
-  });
-
-  await this.noteRepository.save(note);
-
-// 5️⃣ Créer Commentaire automatique
-const commentaire = this.commentaireRepository.create({
-  contenu: iaResult.commentaireAuto,
-  texte: savedTexte,
-  type: 'IA',
-});
-
-  await this.commentaireRepository.save(commentaire);
-
-  // 6️⃣ Mettre statut à corrigé
-  savedTexte.statut = 'corrige';
-  await this.texteRepository.save(savedTexte);
-
-  return savedTexte;
-}
-
-async findOneComplet(id: string, user: any) {
-  const texte = await this.texteRepository.findOne({
-    where: { id },
-    relations: [
-      'student',
-      'exercice',
-      'correction',
-      'note',
-      'commentaires',
-      'commentaires.enseignant',
-    ],
-  });
-
-  if (!texte) {
-    throw new Error('Texte introuvable');
-  }
-
-  // 🔐 Sécurité : si étudiant
-  if (user.role === 'student' && texte.student.id !== user.id) {
-    throw new Error('Accès refusé');
-  }
-
-  return texte;
-}
-
-async findMesTextes(
-  studentId: string,
-  page: number,
-  limit: number,
-  filters: any,
-) {
-
-  const query = this.texteRepository
-    .createQueryBuilder('texte')
-    .leftJoinAndSelect('texte.exercice', 'exercice')
-    .leftJoinAndSelect('texte.note', 'note')
-    .where('texte.studentId = :studentId', { studentId });
-
-  if (filters.statut) {
-    query.andWhere('texte.statut = :statut', { statut: filters.statut });
-  }
-
-  if (filters.validee !== undefined) {
-    query.andWhere('note.validee = :validee', { validee: filters.validee });
-  }
-
-  if (filters.minNote) {
-    query.andWhere('note.noteFinale >= :minNote', { minNote: filters.minNote });
-  }
-
-  if (filters.maxNote) {
-    query.andWhere('note.noteFinale <= :maxNote', { maxNote: filters.maxNote });
-  }
-
-  if (filters.sort) {
-    const order = filters.order || 'DESC';
-    if (filters.sort === 'noteFinale') {
-      query.orderBy('note.noteFinale', order);
+    if (!student) {
+      throw new Error('Etudiant introuvable');
     }
-    else if (filters.sort === 'dateSoumission') {
-      query.orderBy('texte.dateSoumission', order);
+
+    const exerciceId = Number(data.exerciceId);
+    const exercice = await this.exerciceRepository.findOne({
+      where: { id: exerciceId },
+    });
+
+    if (!exercice) {
+      throw new Error('Exercice introuvable');
     }
+
+    const texte = this.texteRepository.create({
+      contenuOriginal: data.contenuOriginal,
+      student,
+      exercice,
+      statut: 'soumis',
+    });
+
+    const savedTexte = await this.texteRepository.save(texte);
+    const iaResult = await this.iaService.analyserTexte(data.contenuOriginal);
+
+    const correction = this.correctionRepository.create({
+      contenuCorrige: iaResult.contenuCorrige,
+      explication: iaResult.explication,
+      texte: savedTexte,
+    });
+    await this.correctionRepository.save(correction);
+
+    const note = this.noteRepository.create({
+      noteIA: iaResult.noteIA,
+      noteFinale: null,
+      validee: false,
+      texte: savedTexte,
+    });
+    await this.noteRepository.save(note);
+
+    const commentaire = this.commentaireRepository.create({
+      contenu: iaResult.commentaireAuto,
+      texte: savedTexte,
+    });
+    await this.commentaireRepository.save(commentaire);
+
+    savedTexte.statut = 'corrige';
+    await this.texteRepository.save(savedTexte);
+
+    return savedTexte;
   }
-  else {
-    query.orderBy('texte.dateSoumission', 'DESC');
+
+  async findOneComplet(id: string, user: any) {
+    const texte = await this.texteRepository.findOne({
+      where: { id },
+      relations: [
+        'student',
+        'exercice',
+        'correction',
+        'note',
+        'commentaires',
+        'commentaires.enseignant',
+      ],
+    });
+
+    if (!texte) {
+      throw new Error('Texte introuvable');
+    }
+
+    if (user.role === 'student' && texte.student.id !== user.id) {
+      throw new Error('Acces refuse');
+    }
+
+    return texte;
   }
 
-  query.skip((page - 1) * limit).take(limit);
+  async findMesTextes(
+    studentId: string,
+    page: number,
+    limit: number,
+    filters: any,
+  ) {
+    const query = this.texteRepository
+      .createQueryBuilder('texte')
+      .leftJoinAndSelect('texte.exercice', 'exercice')
+      .leftJoinAndSelect('texte.note', 'note')
+      .where('texte.studentId = :studentId', { studentId });
 
-  const [data, total] = await query.getManyAndCount();
+    if (filters.statut) {
+      query.andWhere('texte.statut = :statut', { statut: filters.statut });
+    }
 
-  return {
-    data,
-    total,
-    page,
-    lastPage: Math.ceil(total / limit),
-  };
-}
+    if (filters.validee !== undefined) {
+      query.andWhere('note.validee = :validee', { validee: filters.validee });
+    }
 
-async findTextesByExercice(exerciceId: string) {
+    if (filters.minNote) {
+      query.andWhere('note.noteFinale >= :minNote', { minNote: filters.minNote });
+    }
 
-  return this.texteRepository.find({
-    where: { exercice: { id: exerciceId } },
-    relations: ['student', 'note'],
-    order: { dateSoumission: 'DESC' },
-  });
-}
+    if (filters.maxNote) {
+      query.andWhere('note.noteFinale <= :maxNote', { maxNote: filters.maxNote });
+    }
 
-async findMonTexte(exerciceId: string, studentId: string) {
+    if (filters.sort) {
+      const order = filters.order || 'DESC';
+      if (filters.sort === 'noteFinale') {
+        query.orderBy('note.noteFinale', order);
+      } else if (filters.sort === 'dateSoumission') {
+        query.orderBy('texte.dateSoumission', order);
+      }
+    } else {
+      query.orderBy('texte.dateSoumission', 'DESC');
+    }
 
-  return this.texteRepository.findOne({
-    where: {
-      exercice: { id: exerciceId },
-      student: { id: studentId },
-    },
-    relations: ['note'],
-  });
-}
+    query.skip((page - 1) * limit).take(limit);
 
+    const [data, total] = await query.getManyAndCount();
+
+    return {
+      data,
+      total,
+      page,
+      lastPage: Math.ceil(total / limit),
+    };
+  }
+
+  async findTextesByExercice(exerciceId: string) {
+    const parsedExerciceId = Number(exerciceId);
+    return this.texteRepository.find({
+      where: { exercice: { id: parsedExerciceId } },
+      relations: ['student', 'note'],
+      order: { dateSoumission: 'DESC' },
+    });
+  }
+
+  async findMonTexte(exerciceId: string, studentId: string) {
+    const parsedExerciceId = Number(exerciceId);
+    return this.texteRepository.findOne({
+      where: {
+        exercice: { id: parsedExerciceId },
+        student: { id: studentId },
+      },
+      relations: ['note'],
+    });
+  }
 }
