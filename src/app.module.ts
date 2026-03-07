@@ -11,6 +11,7 @@ import { NotesModule } from './notes/notes.module';
 import { CorrectionsModule } from './corrections/corrections.module';
 import { CommentairesModule } from './commentaires/commentaires.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { SubmissionModule } from './submission/submission.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     CorrectionsModule,
     CommentairesModule,
     DashboardModule,
+    SubmissionModule,
   ],
   controllers: [AppController],
   providers: [AppService],

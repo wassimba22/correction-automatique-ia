@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { IaService as AiService } from '../ia/ia.service';
+import { IaService } from '../ia/ia.service';
 import { Submission } from './submission.entity';
 import { User } from '../users/user.entity';
 import { Exercice } from '../exercices/exercice.entity';
@@ -15,7 +15,7 @@ export class SubmissionService {
     private userRepo: Repository<User>,
     @InjectRepository(Exercice)
     private exerciceRepo: Repository<Exercice>,
-    private aiService: AiService,
+    private aiService: IaService,
   ) {}
 
   async findAll() {
@@ -47,37 +47,33 @@ export class SubmissionService {
 
   async createSubmission(text: string, student: User, exercise: Exercice) {
     const aiResult = await this.aiService.analyserTexte(text);
+    const aiObject =
+      aiResult && typeof aiResult === 'object' && !Array.isArray(aiResult)
+        ? (aiResult as Record<string, unknown>)
+        : {};
 
-    let parsed: {
-      correction?: string;
-      note?: number;
-      commentaire?: string;
-    } = {};
-
-    // Hugging Face responses vary by model: handle array, object, or raw JSON string.
-    if (Array.isArray(aiResult) && aiResult[0]?.generated_text) {
-      try {
-        parsed = JSON.parse(aiResult[0].generated_text);
-      } catch {
-        parsed = {};
-      }
-    } else if (typeof aiResult === 'string') {
-      try {
-        parsed = JSON.parse(aiResult);
-      } catch {
-        parsed = {};
-      }
-    } else if (aiResult && typeof aiResult === 'object') {
-      parsed = aiResult as typeof parsed;
-    }
+    const gradeSource = aiObject.note ?? aiObject.noteIA ?? aiObject.grade;
+    const grade =
+      typeof gradeSource === 'number'
+        ? gradeSource
+        : typeof gradeSource === 'string'
+          ? Number(gradeSource.replace(',', '.'))
+          : null;
 
     const submission = this.submissionRepo.create({
       text,
       student,
       exercise,
-      correction: parsed.correction ?? null,
-      grade: parsed.note ?? null,
-      aiComment: parsed.commentaire ?? null,
+      correction:
+        (typeof aiObject.correction === 'string' && aiObject.correction) ||
+        (typeof aiObject.contenuCorrige === 'string' && aiObject.contenuCorrige) ||
+        text,
+      grade: typeof grade === 'number' && !Number.isNaN(grade) ? grade : null,
+      aiComment:
+        (typeof aiObject.commentaire === 'string' && aiObject.commentaire) ||
+        (typeof aiObject.commentaireAuto === 'string' && aiObject.commentaireAuto) ||
+        (typeof aiObject.explication === 'string' && aiObject.explication) ||
+        'Commentaire IA non fourni par le modele.',
     });
 
     return this.submissionRepo.save(submission);

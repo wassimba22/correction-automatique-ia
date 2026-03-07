@@ -54,24 +54,47 @@ export class TextesService {
 
     const savedTexte = await this.texteRepository.save(texte);
     const iaResult = await this.iaService.analyserTexte(data.contenuOriginal);
+    const aiObject =
+      iaResult && typeof iaResult === 'object' && !Array.isArray(iaResult)
+        ? (iaResult as Record<string, unknown>)
+        : {};
+
+    const noteSource = aiObject.note ?? aiObject.noteIA ?? aiObject.grade;
+    const noteValue =
+      typeof noteSource === 'number'
+        ? noteSource
+        : typeof noteSource === 'string'
+          ? Number(noteSource.replace(',', '.'))
+          : undefined;
 
     const correction = this.correctionRepository.create({
-      contenuCorrige: iaResult.contenuCorrige,
-      explication: iaResult.explication,
+      contenuCorrige:
+        (typeof aiObject.correction === 'string' && aiObject.correction) ||
+        (typeof aiObject.contenuCorrige === 'string' && aiObject.contenuCorrige) ||
+        data.contenuOriginal,
+      explication:
+        (typeof aiObject.commentaire === 'string' && aiObject.commentaire) ||
+        (typeof aiObject.commentaireAuto === 'string' && aiObject.commentaireAuto) ||
+        (typeof aiObject.explication === 'string' && aiObject.explication) ||
+        'Analyse IA disponible sans details supplementaires.',
       texte: savedTexte,
     });
     await this.correctionRepository.save(correction);
 
     const note = this.noteRepository.create({
-      noteIA: iaResult.noteIA,
-      noteFinale: null,
+      noteIA: typeof noteValue === 'number' && !Number.isNaN(noteValue) ? noteValue : undefined,
+      noteFinale: undefined,
       validee: false,
       texte: savedTexte,
     });
     await this.noteRepository.save(note);
 
     const commentaire = this.commentaireRepository.create({
-      contenu: iaResult.commentaireAuto,
+      contenu:
+        (typeof aiObject.commentaire === 'string' && aiObject.commentaire) ||
+        (typeof aiObject.commentaireAuto === 'string' && aiObject.commentaireAuto) ||
+        (typeof aiObject.explication === 'string' && aiObject.explication) ||
+        'Commentaire IA non fourni par le modele.',
       texte: savedTexte,
     });
     await this.commentaireRepository.save(commentaire);
@@ -177,3 +200,4 @@ export class TextesService {
     });
   }
 }
+
