@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { SubmissionService } from './submission.service';
 import { CreateSubmissionDto } from './dto/create-submission.dto';
@@ -15,14 +15,28 @@ export class SubmissionController {
     return this.submissionService.findAll();
   }
 
+  @Get(':id')
+  @ApiOperation({ summary: 'Consulter une soumission par ID' })
+  @ApiResponse({ status: 200, description: 'Soumission retournee' })
+  async findOne(@Param('id') id: string) {
+    return this.submissionService.findOne(id);
+  }
+
   @Post()
+  @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({ summary: 'Creer une soumission et lancer evaluation IA' })
-  @ApiResponse({ status: 201, description: 'Soumission creee avec succes' })
+  @ApiResponse({ status: 202, description: 'Soumission acceptee et queuee' })
   async create(@Body() dto: CreateSubmissionDto) {
-    return this.submissionService.createSubmissionByIds(
+    const submission = await this.submissionService.createSubmissionByIds(
       dto.text,
       dto.studentId,
       dto.exerciseId,
     );
+
+    return {
+      message: 'Soumission acceptee. Evaluation IA en cours.',
+      submissionId: submission.id,
+      status: submission.status,
+    };
   }
 }

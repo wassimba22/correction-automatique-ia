@@ -2,12 +2,8 @@ import { Injectable } from '@nestjs/common';
 import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
-
-type NormalizedEvaluation = {
-  correction: string;
-  note: number;
-  commentaire: string;
-};
+import { PromptBuilder } from './prompt-builder';
+import { NormalizedEvaluation, ResponseParser } from './response-parser';
 
 type CachedEvaluation = {
   value: Record<string, unknown>;
@@ -17,6 +13,8 @@ type CachedEvaluation = {
 @Injectable()
 export class IaService {
   private readonly cacheTtlMs = 5 * 60 * 1000;
+  private readonly primaryModel = 'meta-llama/Llama-3.1-8B-Instruct:cheapest';
+  private readonly secondaryModel = 'Qwen/Qwen3.5-27B:cheapest';
   private readonly cache = new Map<string, CachedEvaluation>();
   private readonly inFlight = new Map<string, Promise<Record<string, unknown>>>();
 
@@ -50,27 +48,7 @@ export class IaService {
     text: string,
     cacheKey: string,
   ): Promise<Record<string, unknown>> {
-    const prompt = `
-Tu es un professeur.
-
-Corrige le texte suivant et donne :
-
-1- la version corrigee
-2- une note sur 20
-3- un commentaire pedagogique
-
-Texte:
-${text}
-
-Reponds UNIQUEMENT en JSON valide comme ceci :
-
-{
-  "correction": "...",
-  "note": 15,
-  "commentaire": "..."
-}
-Ne renvoie aucune phrase avant ou apres le JSON.
-`;
+    const prompt = PromptBuilder.buildEvaluationPrompt(text);
 
     try {
       const token = this.getToken();
@@ -78,28 +56,14 @@ Ne renvoie aucune phrase avant ou apres le JSON.
         throw new Error('Missing HUGGINGFACE_API_TOKEN');
       }
 
-      const rawFirst = await this.callModel(token, prompt);
-      const firstCandidate = this.extractJson(rawFirst);
-      const firstNormalized = this.normalizeEvaluation(firstCandidate);
-      if (firstNormalized) {
-        const value = this.toServiceShape(firstNormalized);
+      const normalized = await this.tryResolveEvaluation(token, prompt);
+      if (normalized) {
+        const value = ResponseParser.toServiceShape(normalized);
         this.setCached(cacheKey, value);
         return value;
       }
 
-      // Retry once with a repair prompt when output is not valid JSON.
-      const repairPrompt =
-        'Reponds UNIQUEMENT avec un JSON valide ayant exactement les cles correction, note, commentaire.';
-      const rawSecond = await this.callModel(token, `${prompt}\n\n${repairPrompt}`);
-      const secondCandidate = this.extractJson(rawSecond);
-      const secondNormalized = this.normalizeEvaluation(secondCandidate);
-      if (secondNormalized) {
-        const value = this.toServiceShape(secondNormalized);
-        this.setCached(cacheKey, value);
-        return value;
-      }
-
-      throw new Error('Model returned invalid JSON format');
+      throw new Error('Model returned invalid JSON format after retries');
     } catch (error: unknown) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown IA error';
@@ -147,11 +111,42 @@ Ne renvoie aucune phrase avant ou apres le JSON.
       .trim();
   }
 
-  private async callModel(token: string, prompt: string): Promise<string> {
+  private async tryResolveEvaluation(
+    token: string,
+    basePrompt: string,
+  ): Promise<NormalizedEvaluation | null> {
+    const strictRepairPrompt = PromptBuilder.strictRepairPrompt();
+    const hardRepairPrompt = PromptBuilder.hardRepairPrompt();
+
+    const attempts: Array<{ model: string; prompt: string }> = [
+      { model: this.primaryModel, prompt: basePrompt },
+      { model: this.primaryModel, prompt: `${basePrompt}\n\n${strictRepairPrompt}` },
+      { model: this.primaryModel, prompt: `${basePrompt}\n\n${strictRepairPrompt}\n${hardRepairPrompt}` },
+      { model: this.secondaryModel, prompt: basePrompt },
+      { model: this.secondaryModel, prompt: `${basePrompt}\n\n${strictRepairPrompt}` },
+    ];
+
+    for (const attempt of attempts) {
+      try {
+        const raw = await this.callModel(token, attempt.prompt, attempt.model);
+        const candidate = ResponseParser.extractJson(raw);
+        const normalized = ResponseParser.normalizeEvaluation(candidate);
+        if (normalized) {
+          return normalized;
+        }
+      } catch {
+        // Ignore per-attempt error and continue with next attempt/model.
+      }
+    }
+
+    return null;
+  }
+
+  private async callModel(token: string, prompt: string, model: string): Promise<string> {
     const response = await axios.post(
       'https://router.huggingface.co/v1/chat/completions',
       {
-        model: 'meta-llama/Llama-3.1-8B-Instruct:cheapest',
+        model,
         messages: [
           {
             role: 'user',
@@ -179,96 +174,6 @@ Ne renvoie aucune phrase avant ou apres le JSON.
     }
 
     throw new Error('Empty model content');
-  }
-
-  private extractJson(content: string): Record<string, unknown> | null {
-    const fenced = content.match(/```json\s*([\s\S]*?)```/i);
-    const raw = fenced?.[1]?.trim() ?? this.extractJsonObject(content) ?? content.trim();
-
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        return parsed as Record<string, unknown>;
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  }
-
-  private extractJsonObject(content: string): string | null {
-    const start = content.indexOf('{');
-    const end = content.lastIndexOf('}');
-    if (start >= 0 && end > start) {
-      return content.slice(start, end + 1).trim();
-    }
-    return null;
-  }
-
-  private normalizeEvaluation(data: Record<string, unknown> | null): NormalizedEvaluation | null {
-    if (!data) {
-      return null;
-    }
-
-    const correction = this.pickString(data.correction, data.contenuCorrige);
-    const commentaire = this.pickString(
-      data.commentaire,
-      data.commentaireAuto,
-      data.explication,
-    );
-    const note = this.parseAndClampNote(data.note ?? data.noteIA ?? data.grade);
-
-    if (!correction || !commentaire || note === null) {
-      return null;
-    }
-
-    return {
-      correction,
-      note,
-      commentaire,
-    };
-  }
-
-  private parseAndClampNote(value: unknown): number | null {
-    const note =
-      typeof value === 'number'
-        ? value
-        : typeof value === 'string'
-          ? Number(value.replace(',', '.'))
-          : NaN;
-
-    if (Number.isNaN(note)) {
-      return null;
-    }
-
-    if (note < 0) {
-      return 0;
-    }
-    if (note > 20) {
-      return 20;
-    }
-    return note;
-  }
-
-  private pickString(...values: unknown[]): string | null {
-    for (const value of values) {
-      if (typeof value === 'string' && value.trim().length > 0) {
-        return value.trim();
-      }
-    }
-    return null;
-  }
-
-  private toServiceShape(evalResult: NormalizedEvaluation): Record<string, unknown> {
-    return {
-      correction: evalResult.correction,
-      note: evalResult.note,
-      commentaire: evalResult.commentaire,
-      contenuCorrige: evalResult.correction,
-      noteIA: evalResult.note,
-      commentaireAuto: evalResult.commentaire,
-      explication: evalResult.commentaire,
-    };
   }
 
   private getToken(): string | null {
